@@ -1,9 +1,16 @@
 package action
 
-import "github.com/zyedidia/micro/v2/internal/buffer"
+import (
+	"github.com/zyedidia/micro/v2/internal/buffer"
+	"github.com/zyedidia/micro/v2/internal/display"
+	"github.com/zyedidia/micro/v2/internal/screen"
+)
 
 // InfoBar is the global info bar.
 var InfoBar *InfoPane
+
+// MenuBar is the global menu bar.
+var MenuBar *display.MenuWindow
 
 // LogBufPane is a global log buffer.
 var LogBufPane *BufPane
@@ -12,6 +19,10 @@ var LogBufPane *BufPane
 func InitGlobals() {
 	InfoBar = NewInfoBar()
 	buffer.LogBuf = buffer.NewBufferFromString("", "Log", buffer.BTLog)
+
+	// Initialize menu bar at the top
+	w, _ := screen.Screen.Size()
+	MenuBar = display.NewMenuWindow(0, 0, w, 1)
 }
 
 // GetInfoBar returns the infobar pane

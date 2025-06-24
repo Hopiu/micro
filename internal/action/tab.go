@@ -24,16 +24,21 @@ type TabList struct {
 func NewTabList(bufs []*buffer.Buffer) *TabList {
 	w, h := screen.Screen.Size()
 	iOffset := config.GetInfoBarOffset()
+	menuBarHeight := 1 // Reserve space for menu bar
+
 	tl := new(TabList)
 	tl.List = make([]*Tab, len(bufs))
 	if len(bufs) > 1 {
+		// Multiple tabs: content starts below menu bar + tab bar
 		for i, b := range bufs {
-			tl.List[i] = NewTabFromBuffer(0, 1, w, h-1-iOffset, b)
+			tl.List[i] = NewTabFromBuffer(0, menuBarHeight+1, w, h-1-iOffset-menuBarHeight, b)
 		}
 	} else {
-		tl.List[0] = NewTabFromBuffer(0, 0, w, h-iOffset, bufs[0])
+		// Single tab: content starts directly below menu bar
+		tl.List[0] = NewTabFromBuffer(0, menuBarHeight, w, h-iOffset-menuBarHeight, bufs[0])
 	}
-	tl.TabWindow = display.NewTabWindow(w, 0)
+	// TabWindow positioned below menu bar
+	tl.TabWindow = display.NewTabWindow(w, menuBarHeight)
 	tl.Names = make([]string, len(bufs))
 
 	return tl
@@ -82,16 +87,28 @@ func (t *TabList) RemoveTab(id uint64) {
 func (t *TabList) Resize() {
 	w, h := screen.Screen.Size()
 	iOffset := config.GetInfoBarOffset()
+
+	// Reserve space for menu bar at the top
+	menuBarHeight := 1
+	if MenuBar != nil {
+		MenuBar.Resize(w, menuBarHeight)
+	}
+
+	// InfoBar remains at the bottom
 	InfoBar.Resize(w, h-1)
+
 	if len(t.List) > 1 {
+		// Tab bar is below menu bar
+		tabBarY := menuBarHeight
 		for _, p := range t.List {
-			p.Y = 1
-			p.Node.Resize(w, h-1-iOffset)
+			p.Y = tabBarY + 1 // Content starts below both menu and tab bars
+			p.Node.Resize(w, h-1-iOffset-menuBarHeight)
 			p.Resize()
 		}
 	} else if len(t.List) == 1 {
-		t.List[0].Y = 0
-		t.List[0].Node.Resize(w, h-iOffset)
+		// Single tab: content starts directly below menu bar
+		t.List[0].Y = menuBarHeight
+		t.List[0].Node.Resize(w, h-iOffset-menuBarHeight)
 		t.List[0].Resize()
 	}
 	t.TabWindow.Resize(w, h)

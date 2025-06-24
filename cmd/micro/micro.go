@@ -24,6 +24,7 @@ import (
 	"github.com/zyedidia/micro/v2/internal/buffer"
 	"github.com/zyedidia/micro/v2/internal/clipboard"
 	"github.com/zyedidia/micro/v2/internal/config"
+	"github.com/zyedidia/micro/v2/internal/display"
 	"github.com/zyedidia/micro/v2/internal/screen"
 	"github.com/zyedidia/micro/v2/internal/shell"
 	"github.com/zyedidia/micro/v2/internal/util"
@@ -462,13 +463,35 @@ func DoEvent() {
 
 	// Display everything
 	screen.Screen.Fill(' ', config.DefStyle)
+
+	// Check if dropdown menu is open before displaying content
+	dropdownOpen := action.MenuBar != nil && action.MenuBar.IsOpen()
+
+	// Hide cursor initially (will be shown by panes if no dropdown is open)
 	screen.Screen.HideCursor()
+
+	// Display menu bar first (at the top) - but not the dropdown yet
+	if action.MenuBar != nil {
+		action.MenuBar.Display()
+	}
+
 	action.Tabs.Display()
 	for _, ep := range action.MainTab().Panes {
 		ep.Display()
 	}
 	action.MainTab().Display()
 	action.InfoBar.Display()
+
+	// Display dropdown menus LAST so they appear on top of everything
+	if dropdownOpen {
+		dropdown := action.MenuBar.GetActiveDropdown()
+		if dropdown != nil && dropdown.IsVisible() {
+			dropdown.Display()
+			// Force cursor to be hidden when dropdown is visible
+			screen.Screen.HideCursor()
+		}
+	}
+
 	screen.Screen.Show()
 
 	// Check for new events
@@ -510,17 +533,135 @@ func DoEvent() {
 	if event != nil {
 		_, resize := event.(*tcell.EventResize)
 		if resize {
+			// Handle resize for all components
+			if action.MenuBar != nil {
+				w, _ := screen.Screen.Size()
+				action.MenuBar.Resize(w, 1)
+			}
 			action.InfoBar.HandleEvent(event)
 			action.Tabs.HandleEvent(event)
 		} else if action.InfoBar.HasPrompt {
 			action.InfoBar.HandleEvent(event)
 		} else {
-			action.Tabs.HandleEvent(event)
+			// Check if menu bar should handle the event first
+			handled := false
+			if action.MenuBar != nil {
+				switch e := event.(type) {
+				case *tcell.EventMouse:
+					mx, my := e.Position()
+					if clickedItem := action.MenuBar.HandleClick(mx, my); clickedItem != nil {
+						// Menu item was clicked, execute the action
+						executeMenuAction(clickedItem.Action)
+						handled = true
+					}
+				case *tcell.EventKey:
+					// Handle keyboard navigation for menus and dropdowns
+					var selectedItem *display.DropdownItem
+
+					// Only handle special keys if menu is open
+					if action.MenuBar.IsOpen() {
+						// Menu is open - handle navigation keys
+						if e.Key() == tcell.KeyEnter || e.Key() == tcell.KeyEscape ||
+							e.Key() == tcell.KeyUp || e.Key() == tcell.KeyDown ||
+							e.Key() == tcell.KeyLeft || e.Key() == tcell.KeyRight {
+							selectedItem = action.MenuBar.HandleKeyNavigation(e.Rune(), int(e.Key()))
+							handled = true
+						} else {
+							// Menu is open, check for dropdown item hotkeys
+							selectedItem = action.MenuBar.HandleKeyNavigation(e.Rune(), int(e.Key()))
+							if selectedItem != nil {
+								handled = true
+							}
+						}
+					} else if e.Modifiers()&tcell.ModAlt != 0 {
+						// Menu is closed - only handle Alt+key combinations to open menus
+						selectedItem = action.MenuBar.HandleKeyNavigation(e.Rune(), int(e.Key()))
+						if selectedItem != nil || action.MenuBar.IsOpen() {
+							handled = true
+						}
+					}
+
+					// Execute action if a menu item was selected
+					if selectedItem != nil {
+						// Execute the selected action
+						executeMenuAction(selectedItem.Action)
+						handled = true
+					}
+				}
+			}
+
+			// If menu didn't handle it, pass to tabs
+			if !handled {
+				action.Tabs.HandleEvent(event)
+			}
 		}
 	}
 
 	err := config.RunPluginFn("onAnyEvent")
 	if err != nil {
 		screen.TermMessage(err)
+	}
+}
+
+// executeMenuAction executes the specified action from a menu selection
+func executeMenuAction(actionName string) {
+	// Get the current buffer pane to perform actions on
+	pane := action.MainTab().CurPane()
+	if pane == nil {
+		return
+	}
+
+	// Execute the appropriate action based on the action name
+	switch actionName {
+	case "NewTab":
+		pane.NewTabCmd([]string{})
+	case "Open":
+		pane.OpenFile()
+	case "Save":
+		pane.Save()
+	case "SaveAs":
+		pane.SaveAs()
+	case "Quit":
+		pane.Quit()
+	case "Undo":
+		pane.Undo()
+	case "Redo":
+		pane.Redo()
+	case "Cut":
+		pane.Cut()
+	case "Copy":
+		pane.Copy()
+	case "Paste":
+		pane.Paste()
+	case "HSplit":
+		pane.HSplitAction()
+	case "VSplit":
+		pane.VSplitAction()
+	case "ToggleRuler":
+		pane.ToggleRuler()
+	case "Find":
+		pane.Find()
+	case "FindNext":
+		pane.FindNext()
+	case "FindPrevious":
+		pane.FindPrevious()
+	case "Replace":
+		pane.ReplaceCmd([]string{})
+	case "CommandMode":
+		pane.CommandMode()
+	case "PluginInstall":
+		// Open command mode with plugin install command
+		pane.CommandMode()
+		// TODO: Pre-fill with "plugin install " if possible
+	case "ToggleHelp":
+		pane.ToggleHelp()
+	case "ShowKey":
+		pane.ToggleKeyMenu()
+	case "ShowAbout":
+		// Display about information
+		screen.TermMessage("Micro " + util.Version + " - " + util.CommitHash)
+	default:
+		// If action not recognized, try to execute it as a command
+		screen.TermMessage("Unknown action: " + actionName)
 	}
 }
